@@ -19,6 +19,7 @@ from .embeddings import (
     load_clip_model,
 )
 from .index import load_index, search_index
+from .search import rerank_hybrid, HYBRID_CANDIDATE_MULTIPLIER
 
 
 def compute_precision_at_k(
@@ -107,9 +108,13 @@ def evaluate_model(
     index_path: Path,
     model_name: str = "jina",
     top_k_values: List[int] = [1, 3, 5, 10],
+    use_hybrid: bool = True,
 ) -> pd.DataFrame:
     """
     Полная оценка модели на тестовых запросах.
+    
+    Args:
+        use_hybrid: если True, применяет гибридное ранжирование (вектор + ключевые слова)
     
     Returns:
         DataFrame с метриками по каждому запросу и усреднённые.
@@ -132,12 +137,27 @@ def evaluate_model(
     
     # Поиск
     max_k = max(top_k_values)
-    distances, indices, search_time = search_index(index, query_embs, top_k=max_k)
+    candidate_k = max_k * HYBRID_CANDIDATE_MULTIPLIER if use_hybrid else max_k
+    distances, indices, search_time = search_index(index, query_embs, top_k=candidate_k)
     
     # Считаем метрики
     rows = []
     for q_idx, query in enumerate(queries):
-        retrieved = indices[q_idx]
+        retrieved_indices = indices[q_idx]
+        
+        if use_hybrid:
+            # Переранжируем кандидатов с учётом ключевых слов
+            candidates = [
+                {
+                    "index": int(idx),
+                    "caption": captions[int(idx)],
+                    "score": float(score),
+                }
+                for idx, score in zip(retrieved_indices, distances[q_idx])
+            ]
+            reranked = rerank_hybrid(candidates, query)
+            retrieved_indices = np.array([r["index"] for r in reranked[:max_k]])
+        
         relevant = get_relevant_indices(query, captions)
         
         row = {
@@ -146,10 +166,10 @@ def evaluate_model(
         }
         
         for k in top_k_values:
-            row[f"P@{k}"] = compute_precision_at_k(retrieved, relevant, k)
-            row[f"R@{k}"] = compute_recall_at_k(retrieved, relevant, k)
+            row[f"P@{k}"] = compute_precision_at_k(retrieved_indices, relevant, k)
+            row[f"R@{k}"] = compute_recall_at_k(retrieved_indices, relevant, k)
         
-        row["AP"] = compute_ap(retrieved, relevant)
+        row["AP"] = compute_ap(retrieved_indices, relevant)
         row["search_time_ms"] = (search_time / len(queries)) * 1000
         
         rows.append(row)

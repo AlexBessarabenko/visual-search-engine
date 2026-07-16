@@ -16,6 +16,47 @@ from .embeddings import encode_texts_jina, encode_texts_clip, load_jina_model, l
 from .index import load_index, search_index
 
 
+# Вес ключевых слов в гибридном поиске (0 = чисто векторный, 1 = чисто ключевые слова)
+HYBRID_KEYWORD_WEIGHT = 0.7
+# Сколько кандидатов отбираем векторным поиском для последующего переранжирования
+HYBRID_CANDIDATE_MULTIPLIER = 5
+
+
+def compute_keyword_score(query: str, caption: str) -> float:
+    """
+    Доля слов запроса, найденных в подписи (substring matching, case-insensitive).
+    """
+    query_words = [w for w in query.lower().split() if w]
+    if not query_words:
+        return 0.0
+    caption_lower = caption.lower()
+    matched = sum(1 for w in query_words if w in caption_lower)
+    return matched / len(query_words)
+
+
+def normalize_scores(results: List[dict]) -> None:
+    """Нормализует векторные score результатов в [0, 1] по min-max внутри выборки."""
+    if not results:
+        return
+    scores = [r["score"] for r in results]
+    min_s, max_s = min(scores), max(scores)
+    rng = max_s - min_s
+    for r in results:
+        r["vector_score_norm"] = (r["score"] - min_s) / rng if rng > 1e-9 else 1.0
+
+
+def rerank_hybrid(results: List[dict], query: str, alpha: float = HYBRID_KEYWORD_WEIGHT) -> List[dict]:
+    """
+    Переранжирует кандидатов комбинацией векторного сходства и keyword overlap.
+    """
+    normalize_scores(results)
+    for r in results:
+        kw_score = compute_keyword_score(query, r["caption"])
+        r["hybrid_score"] = alpha * kw_score + (1 - alpha) * r["vector_score_norm"]
+    results.sort(key=lambda x: x["hybrid_score"], reverse=True)
+    return results
+
+
 def search_images(
     query: str,
     index_path: Path,
@@ -23,6 +64,7 @@ def search_images(
     captions: List[str],
     model_name: str = "jina",
     top_k: int = config.TOP_K_DEFAULT,
+    use_hybrid: bool = True,
 ) -> List[dict]:
     """
     Поиск изображений по текстовому запросу.
@@ -34,6 +76,7 @@ def search_images(
         captions: список подписей (для отображения)
         model_name: "jina" или "clip"
         top_k: количество результатов
+        use_hybrid: если True, применяет гибридное ранжирование (вектор + ключевые слова)
     
     Returns:
         Список результатов: [{"rank", "caption", "image_path", "score", "index"}, ...]
@@ -54,8 +97,9 @@ def search_images(
     # L2-нормализация запроса (важно для IndexFlatIP)
     query_emb = query_emb / np.linalg.norm(query_emb, axis=1, keepdims=True)
     
-    # Поиск
-    distances, indices, search_time = search_index(index, query_emb, top_k=top_k)
+    # Векторный поиск: отбираем больше кандидатов для гибридного переранжирования
+    candidate_k = top_k * HYBRID_CANDIDATE_MULTIPLIER if use_hybrid else top_k
+    distances, indices, search_time = search_index(index, query_emb, top_k=candidate_k)
     
     # Формируем результаты
     results = []
@@ -68,6 +112,14 @@ def search_images(
             "image_path": image_paths[idx],
             "score": float(score),  # cosine similarity
         })
+    
+    if use_hybrid:
+        results = rerank_hybrid(results, query)
+        # Оставляем только top_k и обновляем rank/score для отображения
+        results = results[:top_k]
+        for rank, r in enumerate(results, start=1):
+            r["rank"] = rank
+            r["score"] = r["hybrid_score"]
     
     return results, search_time
 
@@ -116,6 +168,7 @@ def batch_search(
     captions: List[str],
     model_name: str = "jina",
     top_k: int = config.TOP_K_DEFAULT,
+    use_hybrid: bool = True,
 ) -> List[Tuple[List[dict], float]]:
     """
     Пакетный поиск по нескольким запросам.
@@ -139,7 +192,8 @@ def batch_search(
     query_embs = query_embs / np.linalg.norm(query_embs, axis=1, keepdims=True)
     
     # Поиск
-    distances, indices, search_time = search_index(index, query_embs, top_k=top_k)
+    candidate_k = top_k * HYBRID_CANDIDATE_MULTIPLIER if use_hybrid else top_k
+    distances, indices, search_time = search_index(index, query_embs, top_k=candidate_k)
     
     # Формируем результаты
     all_results = []
@@ -154,6 +208,11 @@ def batch_search(
                 "image_path": image_paths[idx],
                 "score": float(score),
             })
+        if use_hybrid:
+            results = rerank_hybrid(results, query)[:top_k]
+            for rank, r in enumerate(results, start=1):
+                r["rank"] = rank
+                r["score"] = r["hybrid_score"]
         all_results.append((results, search_time / len(queries)))
     
     return all_results
