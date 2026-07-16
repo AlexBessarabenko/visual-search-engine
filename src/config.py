@@ -19,7 +19,8 @@ for d in (DATA_DIR, IMAGES_DIR, EMBEDDINGS_DIR, INDEXES_DIR):
 
 # ─── Датасет ─────────────────────────────────────────────────────────────
 DATASET_NAME = "google-research-datasets/conceptual_captions"
-MAX_SAMPLES = 200                # CPU-friendly: ~200 изображений
+MAX_SAMPLES = 1500               # запрашиваем больше URL, чтобы получить ~500 валидных
+TARGET_SAMPLES = 500             # итоговый размер датасета
 IMAGE_TIMEOUT = 15               # Секунд на скачивание одного изображения
 MAX_WORKERS = 4                  # Параллельных загрузчиков
 
@@ -61,16 +62,16 @@ TOP_K_DEFAULT = 5
 
 # ─── Тестовые запросы ────────────────────────────────────────────────────
 TEST_QUERIES = [
-    "a dog on the beach",
-    "a red car",
-    "people playing football",
-    "a cat sitting on a table",
-    "a mountain landscape with snow",
-    "a group of friends at a party",
-    "a pizza on a wooden table",
-    "a person riding a bicycle",
-    "sunset over the ocean",
-    "a baby sleeping in a crib",
+    "person on white background",
+    "vector illustration",
+    "isolated on white background",
+    "seamless pattern",
+    "film character",
+    "blue background",
+    "living room interior",
+    "summer beach",
+    "western christian holiday",
+    "beautiful woman",
 ]
 
 # Русские варианты (для демо)

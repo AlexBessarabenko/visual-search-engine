@@ -35,7 +35,7 @@ def load_jina_model() -> Tuple[AutoModel, AutoProcessor]:
         config.JINA_MODEL,
         trust_remote_code=True,
         modality=config.JINA_MODALITY,
-        torch_dtype=torch.float32,
+        dtype=torch.float32,
     ).to(device).eval()
     
     processor = AutoProcessor.from_pretrained(
