@@ -1,0 +1,74 @@
+version: "3.9"
+
+services:
+  visual-search:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: visual-search-engine:latest
+    container_name: visual-search-engine
+    volumes:
+      - ./data:/app/data
+      - ./notebooks:/app/notebooks
+    ports:
+      - "8501:8501"    # Streamlit
+      - "8888:8888"    # Jupyter
+    environment:
+      - PYTHONUNBUFFERED=1
+      - HF_HOME=/app/data/hf_cache
+      - TRANSFORMERS_CACHE=/app/data/hf_cache
+    working_dir: /app
+    # Для CPU-only не нужны GPU
+    # runtime: nvidia
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    command: /bin/bash
+
+  # Jupyter Notebook сервис
+  jupyter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: visual-search-engine:latest
+    container_name: visual-search-jupyter
+    volumes:
+      - ./data:/app/data
+      - ./notebooks:/app/notebooks
+    ports:
+      - "8888:8888"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - HF_HOME=/app/data/hf_cache
+    working_dir: /app
+    command: >
+      jupyter notebook
+      --ip=0.0.0.0
+      --port=8888
+      --no-browser
+      --allow-root
+      --NotebookApp.token=''
+
+  # Streamlit сервис
+  streamlit:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: visual-search-engine:latest
+    container_name: visual-search-streamlit
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "8501:8501"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - HF_HOME=/app/data/hf_cache
+    working_dir: /app
+    command: >
+      streamlit run app/streamlit_app.py
+      --server.port=8501
+      --server.address=0.0.0.0
